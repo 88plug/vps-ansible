@@ -30,6 +30,17 @@
           - ansible
           - ufw
           - fail2ban
+          - rsync
+          - git
+          - nmap
+          - net-tools
+          - build-essential
+          - unzip
+          - bc
+          - curl
+          - screen
+          - python3-pip
+          - lvm2  
         state: present
         update_cache: yes
         force_apt_get: yes
