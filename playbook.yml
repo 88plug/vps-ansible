@@ -1,0 +1,191 @@
+---
+- hosts: all
+  become: true
+  tasks:
+
+    - name: Ensure the system timezone is set to UTC
+      ansible.builtin.timezone:
+        name: Etc/UTC
+#APT
+    - name: Update and upgrade all packages
+      apt:
+        upgrade: dist
+        update_cache: yes
+        cache_valid_time: 3600
+        autoclean: yes
+        autoremove: yes
+      environment:
+        DEBIAN_FRONTEND: noninteractive
+      tags: upgrade
+
+    - name: Upgrade all packages non-interactively and install additional tools
+      apt:
+        name:
+          - htop
+          - bmon
+          - jq
+          - iotop
+          - bleachbit
+          - logrotate
+          - ansible
+          - ufw
+          - fail2ban
+        state: present
+        update_cache: yes
+        force_apt_get: yes
+      environment:
+        DEBIAN_FRONTEND: noninteractive
+      tags: tools
+
+    - name: Ensure required system packages are installed
+      apt:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - ufw
+        - fail2ban
+
+#Firewall hard
+
+    - name: Install UFW
+      apt:
+        name: ufw
+        state: present
+
+    - name: Set UFW default incoming policy to deny
+      ufw:
+        direction: incoming
+        policy: deny
+
+    - name: Set UFW default outgoing policy to allow
+      ufw:
+        direction: outgoing
+        policy: allow
+
+    - name: Allow SSH through UFW
+      ufw:
+        rule: allow
+        port: 22
+        proto: tcp
+
+    - name: Enable UFW
+      ufw:
+        state: enabled
+
+    - name: Install fail2ban
+      apt:
+        name: fail2ban
+        state: present
+
+    - name: Configure fail2ban for permanent jailing
+      copy:
+        dest: /etc/fail2ban/jail.local
+        content: |
+          [DEFAULT]
+          bantime  = -1
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: Ensure fail2ban service is enabled and running
+      service:
+        name: fail2ban
+        state: started
+        enabled: true
+
+# Set GRUB timeout to 0 seconds for near-instant booting
+    - name: Set GRUB timeout
+      lineinfile:
+        path: /etc/default/grub
+        regexp: '^GRUB_TIMEOUT='
+        line: 'GRUB_TIMEOUT=0'
+
+#TIME
+    - name: Ensure chrony (NTP) package is installed
+      apt:
+        name: chrony
+        state: present
+
+    - name: Ensure chrony service is enabled and running
+      service:
+        name: chronyd
+        state: started
+        enabled: true
+
+    - name: Force an immediate synchronization of the time
+      command:
+        cmd: chronyc makestep
+      changed_when: false
+
+    - name: Check if NTP is synchronized
+      command: chronyc tracking
+      register: ntp_status
+      changed_when: false
+
+    - name: Display NTP synchronization status
+      debug:
+        var: ntp_status.stdout_lines
+
+#LIMITS
+    - name: Increase max FD limit / ulimit
+      blockinfile:
+        path: "/etc/security/limits.conf"
+        block: |
+          * soft     nproc          1048576
+          * hard     nproc          1048576
+          * soft     nofile         1048576
+          * hard     nofile         1048576
+          root soft     nproc          unlimited
+          root hard     nproc          unlimited
+          root soft     nofile         unlimited
+          root hard     nofile         unlimited
+
+    - name: Add sysctl.conf parameters
+      sysctl:
+        name: "{{ item.name }}"
+        value: "{{ item.value }}"
+        state: present
+        sysctl_set: yes
+        reload: yes
+      loop:
+        - { name: 'vm.min_free_kbytes', value: '131072' } #128Mb Memory Reserve
+        - { name: 'vm.swappiness', value: '0' }
+        - { name: 'fs.inotify.max_queued_events', value: '1048576' }
+        - { name: 'fs.inotify.max_user_instances', value: '1048576' }
+        - { name: 'fs.inotify.max_user_watches', value: '1048576' }
+        - { name: 'vm.max_map_count', value: '262144' }
+        - { name: 'fs.aio-max-nr', value: '524288' }
+
+
+    - name: Clear all journald logs
+      command: journalctl --vacuum-time=1s
+
+    - name: Mask and stop systemd-journald
+      systemd:
+        name: systemd-journald
+        enabled: no
+        state: stopped
+        masked: yes
+
+    - name: Configure Docker to not store logs
+      copy:
+        dest: /etc/docker/daemon.json
+        content: |
+          {
+            "log-driver": "none"
+          }
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: Run BleachBit
+      command: bleachbit --clean system.rotated_logs system.cache apt.*
+      ignore_errors: yes
+
+    - name: Restart server
+      reboot:
+        msg: "Rebooting to apply system changes"
+        connect_timeout: 5
+        reboot_timeout: 300
+        post_reboot_delay: 30
+        test_command: uptime
