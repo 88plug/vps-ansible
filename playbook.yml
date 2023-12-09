@@ -255,6 +255,81 @@
       when: install_chisel | default(false) | bool
       ignore_errors: yes
 
+
+    # Optional NVIDIA driver and tools installation
+    - block:
+        - name: Install NVIDIA - Add NVIDIA GPG key
+          apt_key:
+            url: https://nvidia.github.io/libnvidia-container/gpgkey
+            state: present
+    
+        - name: Install NVIDIA - Add NVIDIA repository
+          get_url:
+            url: https://nvidia.github.io/libnvidia-container/{{ ansible_distribution }}{{ ansible_distribution_major_version }}/libnvidia-container.list
+            dest: /etc/apt/sources.list.d/libnvidia-container.list
+            force: yes
+    
+        - name: Install NVIDIA - Update repositories
+          apt:
+            update_cache: yes
+            force_ipv4: true
+    
+        - name: Install NVIDIA - Auto-install drivers
+          command: ubuntu-drivers autoinstall
+    
+        - name: Install NVIDIA packages
+          apt:
+            name:
+              - nvidia-cuda-toolkit
+              - nvidia-container-toolkit
+              - nvidia-container-runtime
+            state: present
+    
+        - name: Restart server to apply NVIDIA changes
+          reboot:
+            msg: "Rebooting to apply NVIDIA changes"
+            connect_timeout: 5
+            reboot_timeout: 300
+            post_reboot_delay: 30
+            test_command: uptime
+      when: install_nvidia | default(false) | bool
+
+
+    - name: Reset UFW to Defaults
+      ufw:
+        state: reset
+      when: reset_ufw | default(false) | bool
+
+    - name: Enable UFW Defaults (allow SSH)
+      ufw:
+        rule: allow
+        state: enabled
+        port: 22
+        proto: tcp
+      when: reset_ufw | default(false) | bool
+
+    - name: Allow fixed ports in UFW
+      ufw:
+        port: "{{ item }}"
+        proto: tcp
+        rule: allow
+      loop:
+        - 80
+        - 443
+        - 1317
+        - 26656
+        - 26657
+        - 8443
+        - 8000
+      when: akash_chisel_ports | default(false) | bool
+
+    - name: Allow a range of TCP ports in UFW
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+      loop: "{{ range(30000, 32768) | list }}"
+      when: akash_chisel_ports | default(false) | bool
+
     - name: Restart server
       reboot:
         msg: "Rebooting to apply system changes"
@@ -262,5 +337,7 @@
         reboot_timeout: 300
         post_reboot_delay: 30
         test_command: uptime
+      when: reboot | default(false) | bool
+
 
 
