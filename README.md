@@ -11,12 +11,10 @@ git clone https://github.com/88plug/vps-ansible ; cd vps-ansible
 
 ## Run
 ```
-git clone https://github.com/88plug/vps-ansible ; cd vps-ansible
 ansible-playbook -i inventory.ini playbook.yml
 ```
 
 Run and install optional Docker and docker-compose
 ```
-git clone https://github.com/88plug/vps-ansible ; cd vps-ansible
 ansible-playbook -i inventory.ini playbook.yml -e "install_docker=true"
 ```
