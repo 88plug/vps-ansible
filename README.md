@@ -6,6 +6,7 @@ Meticulously crafted Ansible playbooks designed to streamline the process of set
 apt-get update
 apt-get install -y ansible-playbook
 git clone https://github.com/88plug/vps-ansible ; cd vps-ansible
+nano inventory.ini
 ```
 **You must edit inventory.ini with the new VPS/SSH host.**
 
