@@ -265,14 +265,13 @@
     
         - name: Install NVIDIA - Add NVIDIA repository
           get_url:
-            url: https://nvidia.github.io/libnvidia-container/{{ ansible_distribution }}{{ ansible_distribution_major_version }}/libnvidia-container.list
+            url: "https://nvidia.github.io/libnvidia-container/{{ ansible_distribution | lower }}{{ ansible_distribution_version.split('.')[0] }}.{{ ansible_distribution_version.split('.')[1] }}/libnvidia-container.list"
             dest: /etc/apt/sources.list.d/libnvidia-container.list
             force: yes
     
         - name: Install NVIDIA - Update repositories
           apt:
             update_cache: yes
-            force_ipv4: true
     
         - name: Install NVIDIA - Auto-install drivers
           command: ubuntu-drivers autoinstall
@@ -292,6 +291,7 @@
             reboot_timeout: 300
             post_reboot_delay: 30
             test_command: uptime
+
       when: install_nvidia | default(false) | bool
 
 
