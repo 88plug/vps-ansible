@@ -1,0 +1,175 @@
+---
+- hosts: all
+  become: true
+  vars:
+    ansible_ssh_common_args: "-o StrictHostKeyChecking=no" #Disable check for new hosts
+  tasks:
+
+    - name: Check if file exists
+      stat:
+        path: ~/.config/pip/pip.conf
+      register: file_stat
+    - name: Delete file if it exists
+      file:
+        path: ~/.config/pip/pip.conf
+        state: absent
+      when: file_stat.stat.exists
+
+    - name: Add configuration to pip.conf to allow Python to work without venv
+      lineinfile:
+        path: ~/.config/pip/pip.conf
+        line: "[global]\nbreak-system-packages = true\nroot-user-action = ignore"
+        create: yes
+
+
+    - name: Ensure the system timezone is set to UTC
+      ansible.builtin.timezone:
+        name: Etc/UTC
+#APT
+    - name: Update and upgrade all packages
+      apt:
+        upgrade: dist
+        update_cache: yes
+        cache_valid_time: 3600
+        autoclean: yes
+        autoremove: yes
+      environment:
+        DEBIAN_FRONTEND: noninteractive
+      tags: upgrade
+
+    - name: Upgrade all packages non-interactively and install additional tools
+      apt:
+        name:
+          - wget
+          - htop
+          - bmon
+          - jq
+          - iotop
+          - bleachbit
+          - logrotate
+          - ansible
+          - ufw
+          - fail2ban
+          - rsync
+          - git
+          - nmap
+          - net-tools
+          - build-essential
+          - unzip
+          - bc
+          - curl
+          - screen
+          - python3-full
+          - python3-pip
+          - lvm2
+        state: present
+        update_cache: yes
+        force_apt_get: yes
+      environment:
+        DEBIAN_FRONTEND: noninteractive
+
+#TIME
+    - name: Ensure chrony (NTP) package is installed
+      apt:
+        name: chrony
+        state: present
+
+    - name: Ensure chrony service is enabled and running
+      service:
+        name: chronyd
+        state: started
+        enabled: true
+
+    - name: Force an immediate synchronization of the time
+      command:
+        cmd: chronyc makestep
+      changed_when: false
+
+    - name: Check if NTP is synchronized
+      command: chronyc tracking
+      register: ntp_status
+      changed_when: false
+
+    - name: Display NTP synchronization status
+      debug:
+        var: ntp_status.stdout_lines
+
+#LIMITS
+    - name: Increase max FD limit / ulimit
+      blockinfile:
+        path: "/etc/security/limits.conf"
+        block: |
+          * soft     nproc          1048576
+          * hard     nproc          1048576
+          * soft     nofile         1048576
+          * hard     nofile         1048576
+          root soft     nproc          unlimited
+          root hard     nproc          unlimited
+          root soft     nofile         unlimited
+          root hard     nofile         unlimited
+
+    - name: Add sysctl.conf parameters
+      sysctl:
+        name: "{{ item.name }}"
+        value: "{{ item.value }}"
+        state: present
+        sysctl_set: yes
+        reload: yes
+      loop:
+        - { name: 'vm.min_free_kbytes', value: '131072' } #128Mb Memory Reserve
+        - { name: 'vm.swappiness', value: '0' }
+        - { name: 'fs.inotify.max_queued_events', value: '1048576' }
+        - { name: 'fs.inotify.max_user_instances', value: '1048576' }
+        - { name: 'fs.inotify.max_user_watches', value: '1048576' }
+        - { name: 'vm.max_map_count', value: '262144' }
+        - { name: 'fs.aio-max-nr', value: '524288' }
+
+    - name: Install Chisel dependencies
+      apt:
+        name:
+          - curl
+          - psmisc
+          - screen
+        state: present
+        update_cache: yes
+
+    - name: Install Chisel
+      shell: |
+        curl https://i.jpillora.com/chisel! | bash
+      args:
+        executable: /bin/bash
+
+    - name: Install Neofetch
+      shell: |
+        wget http://ftp.us.debian.org/debian/pool/main/n/neofetch/neofetch_7.1.0-4_all.deb
+        dpkg -i neofetch_7.1.0-4_all.deb
+      args:
+        executable: /bin/bash
+
+    # Configure and enable Chisel service
+    - name: Configure Chisel systemd service
+      copy:
+        dest: /etc/systemd/system/chisel.service
+        content: |
+          [Unit]
+          Description=Chisel BDL Service
+          After=network.target
+
+          [Service]
+          ExecStartPre=/bin/bash -c "sleep 10" # optional: wait a bit for the network to be ready
+          ExecStart=/bin/bash -c 'chisel server --host x.x.x.x --port 8000 --reverse -v --auth user:strong_password'
+          Restart=always
+          User=root
+          Group=root
+          Environment=PATH=/usr/bin:/usr/local/bin:/sbin:/bin
+          KillMode=process
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Clear all journald logs
+      command: journalctl --vacuum-time=1s
+
+    - name: Run BleachBit
+      command: bleachbit --clean system.rotated_logs system.cache apt.*
+      ignore_errors: yes
