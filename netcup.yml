@@ -1,0 +1,117 @@
+---
+- name: Optimize Ubuntu 22.04 VPS and Upgrade to Latest Point Release
+  hosts: all
+  user: root
+  vars:
+    ansible_ssh_common_args: '-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no' #Disable check for new hosts
+    logs2ram_size: 50M
+    default_sources_list: |
+      deb http://archive.ubuntu.com/ubuntu jammy main restricted universe multiverse
+      deb http://archive.ubuntu.com/ubuntu jammy-updates main restricted universe multiverse
+      deb http://archive.ubuntu.com/ubuntu jammy-security main restricted universe multiverse
+
+    unnecessary_services:
+      - apparmor
+      - ModemManager
+      - polkit
+      - udisks2
+      - thermald
+      - gpu-manager
+
+  tasks:
+    - name: Replace sources.list with default Ubuntu repositories
+      copy:
+        content: "{{ default_sources_list }}"
+        dest: /etc/apt/sources.list
+        backup: yes
+
+    - name: Disable provider-specific repositories
+      command: rm -f /etc/apt/sources.list.d/*
+
+    - name: Disable unnecessary services
+      systemd:
+        name: "{{ item }}"
+        state: stopped
+        enabled: no
+      loop: "{{ unnecessary_services }}"
+
+    - name: Ensure the system timezone is set to UTC
+      ansible.builtin.timezone:
+        name: Etc/UTC
+#APT
+    - name: Remove unnecessary packages
+      apt:
+        name:
+          - irqbalance
+          - snapd
+          - cups
+          - popularity-contest
+          - landscape-common
+          - postfix
+          - sendmail
+          - network-manager
+          - telnetd
+          - xserver-xorg-core
+          - xserver-common
+          - x11-common
+        state: absent
+        purge: yes
+
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+
+    - name: Install linux-generic-hwe-22.04
+      ansible.builtin.apt:
+        name: linux-generic-hwe-22.04
+        state: present
+
+    - name: Reboot the server
+      reboot:
+
+    - name: Update and upgrade all packages
+      apt:
+        upgrade: dist
+        update_cache: yes
+        autoclean: yes
+        autoremove: yes
+      environment:
+        DEBIAN_FRONTEND: noninteractive
+      tags: upgrade
+
+    - name: Remove swap entry from fstab
+      lineinfile:
+        path: /etc/fstab
+        regexp: '^/swap'
+        state: absent
+
+    - name: Install logs2ram dependencies
+      apt:
+        name: git
+        state: present
+
+    - name: Clone logs2ram repository
+      git:
+        repo: https://github.com/azlux/log2ram.git
+        dest: /opt/log2ram
+
+    - name: Install logs2ram
+      command: /opt/log2ram/install.sh "{{ logs2ram_size }}"
+
+    - name: Reboot the server
+      reboot:
+
+    - name: Clear temporary files
+      command: |
+        rm -rf /tmp/*
+        rm -rf /var/tmp/*
+
+    - name: Purge unused locales
+      command: locale-gen --purge
+
+    - name: Clean up apt cache
+      apt:
+        autoclean: yes
+        autoremove: yes
+      environment:
+        DEBIAN_FRONTEND: noninteractive
