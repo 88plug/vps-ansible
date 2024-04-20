@@ -35,9 +35,68 @@
         enabled: no
       loop: "{{ unnecessary_services }}"
 
+#TIME
+
     - name: Ensure the system timezone is set to UTC
       ansible.builtin.timezone:
         name: Etc/UTC
+        
+    - name: Ensure chrony (NTP) package is installed
+      apt:
+        name: chrony
+        state: present
+
+    - name: Ensure chrony service is enabled and running
+      service:
+        name: chronyd
+        state: started
+        enabled: true
+
+    - name: Force an immediate synchronization of the time
+      command:
+        cmd: chronyc makestep
+      changed_when: false
+
+    - name: Check if NTP is synchronized
+      command: chronyc tracking
+      register: ntp_status
+      changed_when: false
+
+    - name: Display NTP synchronization status
+      debug:
+        var: ntp_status.stdout_lines
+
+#LIMITS
+    - name: Increase max FD limit / ulimit
+      blockinfile:
+        path: "/etc/security/limits.conf"
+        block: |
+          * soft     nproc          1048576
+          * hard     nproc          1048576
+          * soft     nofile         1048576
+          * hard     nofile         1048576
+          root soft     nproc          unlimited
+          root hard     nproc          unlimited
+          root soft     nofile         unlimited
+          root hard     nofile         unlimited
+
+    - name: Add sysctl.conf parameters
+      sysctl:
+        name: "{{ item.name }}"
+        value: "{{ item.value }}"
+        state: present
+        sysctl_set: yes
+        reload: yes
+      loop:
+        - { name: 'vm.min_free_kbytes', value: '131072' } #128Mb Memory Reserve
+        - { name: 'vm.swappiness', value: '0' }
+        - { name: 'fs.inotify.max_queued_events', value: '1048576' }
+        - { name: 'fs.inotify.max_user_instances', value: '1048576' }
+        - { name: 'fs.inotify.max_user_watches', value: '1048576' }
+        - { name: 'vm.max_map_count', value: '1000000' }
+        - { name: 'fs.aio-max-nr', value: '524288' }
+
+
 #APT
     - name: Remove unnecessary packages
       apt:
